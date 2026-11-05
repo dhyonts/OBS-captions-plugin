@@ -4,6 +4,8 @@ Requires Python 3 and a C++17 compiler (CXX, default c++). No OBS/Qt required.
 This is a focused integration check, not a substitute for building the plugin.
 """
 import os
+import json
+import shutil
 from pathlib import Path
 import shlex
 import subprocess
@@ -26,6 +28,7 @@ def function(signature):
 
 harness = r'''
 #include "RecordingTranscriptTimeline.h"
+#include "TranscriptFormats.h"
 #include <cassert>
 #include <deque>
 #include <fstream>
@@ -105,6 +108,31 @@ int main() {
     ifstream srt("caption.srt");
     getline(srt, line); assert(line == "1");
     getline(srt, line); assert(line == "00:00:15,000 --> 00:00:18,000");
+    settings.webvtt = true;
+    get<2>(results[0]) = "Fish & chips <tag> --> café";
+    output.open("caption.vtt", ios::out | ios::trunc);
+    output << "WEBVTT\n\n";
+    assert(write_results_batch_srt(settings, output, results, 0) > 0);
+    output.close();
+    ifstream vtt("caption.vtt");
+    getline(vtt, line); assert(line == "WEBVTT");
+    getline(vtt, line); assert(line.empty());
+    getline(vtt, line); assert(line == "00:00:15.000 --> 00:00:18.000");
+    getline(vtt, line); assert(line == "Fish &amp; chips &lt;tag&gt; --&gt; café");
+    int offset = -1;
+    vtt.clear(); vtt.seekg(0);
+    assert(webvtt_append_offset(vtt, offset) && offset == 18000);
+    settings.timestamp_offset_ms = offset;
+    output.open("append.vtt", ios::out | ios::trunc);
+    assert(write_results_batch_srt(settings, output, results, 0) > 0);
+    output.close();
+    ifstream appended("append.vtt");
+    getline(appended, line); assert(line == "00:00:33.000 --> 00:00:36.000");
+    // VTT requires a strictly positive cue duration.
+    get<1>(results[0]) = get<0>(results[0]);
+    output.open("empty.vtt", ios::out | ios::trunc);
+    assert(write_results_batch_srt(settings, output, results, 0) == 0);
+    output.close();
     auto paused = make_shared<OutputCaptionResult>();
     paused->caption_result = {at(12), at(20)};
     recording.caption_queue.items.push_back({paused, false});
@@ -130,4 +158,12 @@ with tempfile.TemporaryDirectory() as temp:
     subprocess.run(compiler + flags + ['-I', str(root / 'src'), str(temp / 'integration.cpp'),
                    '-o', str(temp / 'integration')], check=True)
     subprocess.run([str(temp / 'integration')], check=True, cwd=temp)
-print('Recording transcript dequeue, SRT and text timestamp integration checks passed')
+    if shutil.which('ffprobe'):
+        packets = json.loads(subprocess.check_output([
+            'ffprobe', '-v', 'error', '-show_packets', '-show_entries',
+            'packet=pts_time,duration_time', '-of', 'json', str(temp / 'caption.vtt')], text=True))['packets']
+        assert len(packets) == 1
+        assert float(packets[0]['pts_time']) == 15.0
+        assert float(packets[0]['duration_time']) == 3.0
+        print('FFmpeg independently parsed the generated WebVTT cue: 15–18 seconds')
+print('Recording transcript dequeue, SRT, VTT and text timestamp integration checks passed')

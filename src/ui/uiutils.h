@@ -113,7 +113,7 @@ static string transcript_format_extension(const string &format, const string &fa
     if (format == "raw")
         return "log";
 
-    if (format == "txt" || format == "srt")
+    if (format == "txt" || format == "srt" || format == "vtt")
         return format;
 
     if (format == "txt_plain")

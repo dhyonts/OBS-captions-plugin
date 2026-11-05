@@ -20,6 +20,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "log.h"
 #include <utils.h>
 #include <QLineEdit>
+#include <QMenu>
+#include <QAction>
+#include <QSignalBlocker>
 #include <QFileDialog>
 #include "../storage_utils.h"
 #include "../caption_stream_helper.cpp"
@@ -195,7 +198,28 @@ CaptionSettingsWidget::CaptionSettingsWidget(const CaptionPluginSettings &latest
     setup_combobox_capitalization(*capitalizationComboBox);
     setup_combobox_capitalization(*srtCapitalizationComboBox);
     setup_combobox_output_target(*outputTargetComboBox, true);
-    setup_combobox_transcript_format(*transcriptFormatComboBox);
+    auto format_menu = new QMenu(transcriptFormatButton);
+    transcriptFormatButton->setMenu(format_menu);
+    for (const auto &entry : vector<pair<QString, QString>>{
+            {"SubRip (.srt)", "srt"}, {"WebVTT (.vtt)", "vtt"},
+            {"Text with timestamps (.txt)", "txt"}, {"Text only (.txt)", "txt_plain"},
+            {"Raw debug log (.log)", "raw"}}) {
+        auto action = format_menu->addAction(entry.first);
+        action->setData(entry.second);
+        action->setCheckable(true);
+        action->setChecked(entry.second == "srt");
+        QObject::connect(action, &QAction::toggled, this, [this, action](bool checked) {
+            if (!checked) {
+                bool any = false;
+                for (auto item : transcriptFormatButton->menu()->actions()) any |= item->isChecked();
+                if (!any) {
+                    const QSignalBlocker blocked(action);
+                    action->setChecked(true);
+                }
+            }
+            transcript_formats_changed();
+        });
+    }
 
     setup_combobox_recording_filename(*recordingTranscriptFilenameComboBox);
     setup_combobox_streaming_filename(*streamingTranscriptFilenameComboBox);
@@ -213,8 +237,7 @@ CaptionSettingsWidget::CaptionSettingsWidget(const CaptionPluginSettings &latest
     QObject::connect(captionWhenComboBox, static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
                      this, &CaptionSettingsWidget::caption_when_index_change);
 
-    QObject::connect(transcriptFormatComboBox, static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
-                     this, &CaptionSettingsWidget::transcript_format_index_change);
+
 
     QObject::connect(languageComboBox, static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
                      this, &CaptionSettingsWidget::language_index_change);
@@ -368,12 +391,30 @@ void CaptionSettingsWidget::update_scene_collection_ui(const string &use_scene_c
     this->caption_settings_widget->setSettings(use_settings.text_outputs);
 }
 
-void CaptionSettingsWidget::transcript_format_index_change(int new_index) {
-    const bool isSrt = transcriptFormatComboBox->currentData().toString().toStdString() == "srt";
-    transcriptSrtSettingsWidget->setVisible(isSrt);
+string CaptionSettingsWidget::selected_transcript_formats() const {
+    string selected;
+    for (auto action : transcriptFormatButton->menu()->actions()) {
+        if (action->isChecked()) {
+            if (!selected.empty()) selected += ",";
+            selected += action->data().toString().toStdString();
+        }
+    }
+    return selected;
+}
 
-    const auto format = transcriptFormatComboBox->currentData().toString().toStdString();
-    const QString extension = QString::fromStdString(transcript_format_extension(format, "[ext]"));
+void CaptionSettingsWidget::transcript_formats_changed() {
+    const auto formats = transcript_formats(selected_transcript_formats());
+    bool subtitles = false;
+    QStringList labels, extensions;
+    for (auto action : transcriptFormatButton->menu()->actions())
+        if (action->isChecked()) labels << action->text();
+    for (const auto &format : formats) {
+        subtitles |= format == "srt" || format == "vtt";
+        extensions << QString::fromStdString(transcript_output_extension(format, formats));
+    }
+    transcriptFormatButton->setText(labels.join(" + "));
+    transcriptSrtSettingsWidget->setVisible(subtitles);
+    const auto extension = extensions.join("/");
     update_combobox_recording_filename(*recordingTranscriptFilenameComboBox, extension);
     update_combobox_streaming_filename(*streamingTranscriptFilenameComboBox, extension);
     update_combobox_virtualcam_filename(*virtualcamTranscriptFilenameComboBox, extension);
@@ -466,7 +507,7 @@ void CaptionSettingsWidget::accept_current_settings() {
     transcript_settings.virtualcam_transcripts_enabled =  transcriptsEnabledVirtualcamCheckBox->isChecked();
 
     transcript_settings.output_path = transcriptFolderPathLineEdit->text().toStdString();
-    transcript_settings.format = transcriptFormatComboBox->currentData().toString().toStdString();
+    transcript_settings.format = selected_transcript_formats();
     transcript_settings.srt_target_duration_secs = srtDurationSpinBox->value();
     transcript_settings.srt_target_line_length = srtLineLengthSpinBox->value();
     transcript_settings.srt_add_punctuation = srtAddPunctuationCheckBox->isChecked();
@@ -555,8 +596,12 @@ void CaptionSettingsWidget::updateUi() {
     this->transcriptsEnabledVirtualcamCheckBox->setChecked(source_settings.transcript_settings.virtualcam_transcripts_enabled);
 
     transcriptFolderPathLineEdit->setText(QString::fromStdString(source_settings.transcript_settings.output_path));
-    combobox_set_data_str(*transcriptFormatComboBox, source_settings.transcript_settings.format.c_str(), 0);
-    transcript_format_index_change(0);
+    const auto formats = transcript_formats(source_settings.transcript_settings.format);
+    for (auto action : transcriptFormatButton->menu()->actions()) {
+        const QSignalBlocker blocked(action);
+        action->setChecked(std::find(formats.begin(), formats.end(), action->data().toString().toStdString()) != formats.end());
+    }
+    transcript_formats_changed();
     srtDurationSpinBox->setValue(source_settings.transcript_settings.srt_target_duration_secs);
     srtLineLengthSpinBox->setValue(source_settings.transcript_settings.srt_target_line_length);
     srtAddPunctuationCheckBox->setChecked(source_settings.transcript_settings.srt_add_punctuation);

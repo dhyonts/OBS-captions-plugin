@@ -38,10 +38,11 @@ Q_OBJECT
     OpenCaptionSettingsList *caption_settings_widget;
 
     void accept_current_settings();
+    string selected_transcript_formats() const;
 
 private slots:
 
-    void transcript_format_index_change(int index);
+    void transcript_formats_changed();
 
     void language_index_change(int index);
 

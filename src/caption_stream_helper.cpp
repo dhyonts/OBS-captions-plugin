@@ -710,23 +710,12 @@ static void setup_combobox_output_target(QComboBox &comboBox, bool add_off_optio
 
 }
 
-static void setup_combobox_transcript_format(QComboBox &comboBox) {
-    while (comboBox.count())
-        comboBox.removeItem(0);
-
-    comboBox.addItem("SubRip Subtitle (.srt) ", "srt");
-    comboBox.addItem("Text with timestamps (.txt)", "txt");
-    comboBox.addItem("Text only (.txt)", "txt_plain");
-    comboBox.addItem("Raw (For Debug/Tools, Very Spammy, .log)", "raw");
-}
-
-
 static void setup_combobox_recording_filename(QComboBox &comboBox) {
     while (comboBox.count())
         comboBox.removeItem(0);
 
-    comboBox.addItem("[Same As Recording].[srt/txt/log]", "recording");
-    comboBox.addItem("recording_transcript_[datetime].[srt/txt/log]", "datetime");
+    comboBox.addItem("[Same As Recording].[srt/vtt/txt/log]", "recording");
+    comboBox.addItem("recording_transcript_[datetime].[srt/vtt/txt/log]", "datetime");
     comboBox.addItem("Custom Name", "custom");
 }
 
@@ -744,7 +733,7 @@ static void setup_combobox_streaming_filename(QComboBox &comboBox) {
     while (comboBox.count())
         comboBox.removeItem(0);
 
-    comboBox.addItem("streaming_transcript_[datetime].[srt/txt/log]", "datetime");
+    comboBox.addItem("streaming_transcript_[datetime].[srt/vtt/txt/log]", "datetime");
     comboBox.addItem("Custom Name", "custom");
 }
 
@@ -759,7 +748,7 @@ static void setup_combobox_virtualcam_filename(QComboBox &comboBox) {
     while (comboBox.count())
         comboBox.removeItem(0);
 
-    comboBox.addItem("virtualcam_transcript_[datetime].[srt/txt/log]", "datetime");
+    comboBox.addItem("virtualcam_transcript_[datetime].[srt/vtt/txt/log]", "datetime");
     comboBox.addItem("Custom Name", "custom");
 }
 
