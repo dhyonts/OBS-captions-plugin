@@ -124,4 +124,6 @@ ui = ET.parse(root / 'src/ui/CaptionSettingsWidget.ui').getroot()
 button = ui.find(".//widget[@name='transcriptFormatButton']")
 assert button is not None and button.attrib['class'] == 'QToolButton'
 assert button.find("property[@name='popupMode']/enum").text == 'QToolButton::InstantPopup'
+widget_source = (root / 'src/ui/CaptionSettingsWidget.cpp').read_text()
+assert widget_source.index('this->updateUi();') > widget_source.index('transcriptFormatButton->setMenu(')
 print('Format selection, filenames, WebVTT validation, UI XML, and multi-output drain tests passed')

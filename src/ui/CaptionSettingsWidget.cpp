@@ -180,7 +180,6 @@ CaptionSettingsWidget::CaptionSettingsWidget(const CaptionPluginSettings &latest
     this->verticalLayoutTabTranscripts->setAlignment(Qt::AlignTop);
     this->verticalLayoutTabOpenCaptions->setAlignment(Qt::AlignTop);
     this->verticalLayoutTabTextFiltering->setAlignment(Qt::AlignTop);
-    this->updateUi();
 
 #if ENABLE_CUSTOM_API_KEY
     this->apiKeyLabel->show();
@@ -271,6 +270,7 @@ CaptionSettingsWidget::CaptionSettingsWidget(const CaptionPluginSettings &latest
     this->wordReplacementTableWidget->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Fixed);
     this->wordReplacementTableWidget->setColumnWidth(0, 80);
     this->wordReplacementTableWidget->setColumnWidth(3, 25);
+    this->updateUi();
 }
 
 void CaptionSettingsWidget::set_show_key(bool set_to_show) {
