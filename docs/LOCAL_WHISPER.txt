@@ -1,0 +1,65 @@
+Local Whisper server (experimental)
+
+This provider connects OBS to a separately running whisper.cpp server on the
+same computer. The server loads the model; the plugin does not bundle, download,
+train or launch a model. Choose compatible Whisper weights when starting the
+server. Google remains the default, and existing settings are preserved.
+
+1. Build/install whisper.cpp and obtain compatible model weights using its
+   official instructions: https://github.com/ggml-org/whisper.cpp
+2. Start its server, for example:
+   whisper-server --host 127.0.0.1 --port 8080 -m /path/to/your/model.bin
+3. In the plugin's General settings, select Local Whisper server (experimental).
+   Use http://127.0.0.1:8080/inference as the Local server address. Select the
+   spoken language and an audio batch length between 2 and 15 seconds.
+4. Select SRT, VTT or both in the transcript Formats menu. Speak a test phrase,
+   wait for its caption to appear, and check the recording before regular use.
+
+The model is selected on the server, rather than in OBS. English-only weights
+are for English; use multilingual weights for other languages. Hardware speed
+and the selected model determine whether inference keeps up with recording.
+The provider implements whisper.cpp's /inference multipart/JSON protocol, not
+every local model server or every transcription API. Server documentation:
+https://github.com/ggml-org/whisper.cpp/tree/master/examples/server
+
+Runtime requirements: curl on PATH (included with recent macOS and Windows;
+install curl on Linux if needed). Only Qt Core is used; no new Qt module or
+model runtime is linked into OBS. Builds still use the repository's normal
+Google API build option; ENABLE_CUSTOM_API_KEY=ON permits a keyless build for
+local use. No Google API key is needed when using the local provider.
+
+Audio stays on the computer in local mode. Endpoints must be HTTP loopback
+addresses (127.0.0.1, ::1 or localhost, normalized to 127.0.0.1). Requests ignore
+proxy/curl configuration, do not follow redirects, and never fall back to
+Google if local inference fails. Temporary WAV files are removed after each
+request. The request can be cancelled on stop and has bounded time/response
+limits. Errors are written to the OBS log.
+
+Behavior and current limitations
+
+- Captions arrive as final batches, with no word-by-word partial previews.
+  Batches finish after a short quiet interval or the configured maximum length.
+  The simple silence gate avoids sending wholly quiet batches; it is not a
+  trained voice activity detector. Use the server's VAD options if appropriate.
+- Results carry audio capture times, rather than inference completion times.
+  The existing recording-pause correction therefore applies to local output.
+- Slow inference can overflow the existing bounded audio queue. Gaps reset the
+  pending audio segment rather than assigning false continuous timestamps.
+- Hard batch boundaries can cut words. No cross-batch context or overlap
+  reconciliation is implemented yet.
+- Before stopping a recording, wait for the last phrase to appear. Pending
+  audio or an in-flight request is cancelled when captioning shuts down.
+- The Google profanity option does not apply to local inference. Existing text
+  replacements/output formatting still apply.
+
+Validation performed: deterministic C++ PCM batching/timestamp/silence/gap and
+WAV tests; real curl multipart requests to a loopback HTTP fixture using only
+synthetic audio; existing pause and SRT/VTT tests. The fixture is not an AI
+model. The full Qt/OBS plugin and real model inference have not been tested on
+this development host. Build and test before merging or installing this draft.
+
+Suggested acceptance test: start a real local model, transcribe several minutes
+in your language, check repeated phrases and sentence boundaries, pause/resume
+a recording, compare SRT/VTT against audio, change providers, then stop OBS
+during a request. Confirm shutdown completes and no stale captions appear in
+the next session.

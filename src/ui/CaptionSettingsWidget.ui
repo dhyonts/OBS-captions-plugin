@@ -215,6 +215,13 @@
               <property name="bottomMargin">
                <number>0</number>
               </property>
+              <item row="7" column="0"><widget class="QLabel" name="transcriptionProviderLabel"><property name="text"><string>Transcription</string></property></widget></item>
+              <item row="7" column="1"><widget class="QComboBox" name="transcriptionProviderComboBox"/></item>
+              <item row="8" column="0"><widget class="QLabel" name="localWhisperUrlLabel"><property name="text"><string>Local server</string></property></widget></item>
+              <item row="8" column="1"><widget class="QLineEdit" name="localWhisperUrlLineEdit"><property name="placeholderText"><string>http://127.0.0.1:8080/inference</string></property></widget></item>
+              <item row="9" column="0"><widget class="QLabel" name="localWhisperChunkLabel"><property name="text"><string>Audio batch length</string></property></widget></item>
+              <item row="9" column="1"><widget class="QSpinBox" name="localWhisperChunkSpinBox"><property name="minimum"><number>2</number></property><property name="maximum"><number>15</number></property><property name="suffix"><string> seconds</string></property></widget></item>
+              <item row="10" column="1"><widget class="QLabel" name="localWhisperHelpLabel"><property name="text"><string>Start whisper-server on this computer and choose its model there. Captions arrive in short batches. No audio is sent to Google in local mode.</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
               <item row="0" column="0">
                <widget class="QLabel" name="label">
                 <property name="sizePolicy">

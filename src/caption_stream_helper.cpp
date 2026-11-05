@@ -309,6 +309,9 @@ static CaptionPluginSettings get_CaptionPluginSettings_from_data(obs_data_t *loa
     obs_data_set_default_string(load_data, "mute_source_name", "");
     obs_data_set_default_string(load_data, "source_caption_when", "");
 
+    obs_data_set_default_string(load_data, "transcription_provider", "google");
+    obs_data_set_default_string(load_data, "local_whisper_url", "http://127.0.0.1:8080/inference");
+    obs_data_set_default_int(load_data, "local_whisper_chunk_seconds", 5);
     obs_data_set_default_string(load_data, "source_language", source_settings.stream_settings.stream_settings.language.c_str());
     obs_data_set_default_int(load_data, "profanity_filter", source_settings.stream_settings.stream_settings.profanity_filter);
     obs_data_set_default_string(load_data, "custom_api_key", source_settings.stream_settings.stream_settings.api_key.c_str());
@@ -409,6 +412,10 @@ static CaptionPluginSettings get_CaptionPluginSettings_from_data(obs_data_t *loa
 
     source_settings.scene_collection_settings = get_SceneCollectionSettings_from_data(load_data);
 
+    source_settings.transcription_provider = obs_data_get_string(load_data, "transcription_provider");
+    source_settings.local_whisper_url = obs_data_get_string(load_data, "local_whisper_url");
+    source_settings.local_whisper_chunk_seconds = static_cast<int>(obs_data_get_int(load_data, "local_whisper_chunk_seconds"));
+
     source_settings.transcript_settings.enabled = obs_data_get_bool(load_data, "transcript_enabled");
     source_settings.transcript_settings.write_realtime =
             obs_data_get_bool(load_data, "transcript_write_realtime");
@@ -491,6 +498,9 @@ static void set_CaptionPluginSettings_on_data(obs_data_t *save_data, const Capti
     obs_data_set_bool(save_data, "transcript_for_virtualcam_enabled",
                       settings.source_cap_settings.transcript_settings.virtualcam_transcripts_enabled);
     obs_data_set_string(save_data, "transcript_folder_path", settings.source_cap_settings.transcript_settings.output_path.c_str());
+    obs_data_set_string(save_data, "transcription_provider", source_settings.transcription_provider.c_str());
+    obs_data_set_string(save_data, "local_whisper_url", source_settings.local_whisper_url.c_str());
+    obs_data_set_int(save_data, "local_whisper_chunk_seconds", source_settings.local_whisper_chunk_seconds);
     obs_data_set_string(save_data, "transcript_format", settings.source_cap_settings.transcript_settings.format.c_str());
 
     obs_data_set_string(save_data, "transcript_recording_name_type",

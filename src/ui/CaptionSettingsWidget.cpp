@@ -23,6 +23,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QMenu>
 #include <QAction>
 #include <QSignalBlocker>
+#include <QMessageBox>
+#include <QUrl>
 #include <QFileDialog>
 #include "../storage_utils.h"
 #include "../caption_stream_helper.cpp"
@@ -192,6 +194,10 @@ CaptionSettingsWidget::CaptionSettingsWidget(const CaptionPluginSettings &latest
     captionWhenComboBox->addItem("Caption Source is heard on stream", "own_source");
     captionWhenComboBox->addItem("Mute Source is heard on stream", "other_mute_source");
 
+    transcriptionProviderComboBox->addItem("Google Speech", "google");
+    transcriptionProviderComboBox->addItem("Local Whisper server (experimental)", "local_whisper");
+    QObject::connect(transcriptionProviderComboBox, static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
+                     this, &CaptionSettingsWidget::transcription_provider_changed);
     setup_combobox_languages(*languageComboBox);
     setup_combobox_profanity(*profanityFilterComboBox);
     setup_combobox_capitalization(*capitalizationComboBox);
@@ -420,6 +426,20 @@ void CaptionSettingsWidget::transcript_formats_changed() {
     update_combobox_virtualcam_filename(*virtualcamTranscriptFilenameComboBox, extension);
 }
 
+void CaptionSettingsWidget::transcription_provider_changed() {
+    const bool local = transcriptionProviderComboBox->currentData().toString() == "local_whisper";
+    localWhisperUrlLabel->setVisible(local);
+    localWhisperUrlLineEdit->setVisible(local);
+    localWhisperChunkLabel->setVisible(local);
+    localWhisperChunkSpinBox->setVisible(local);
+    localWhisperHelpLabel->setVisible(local);
+    profanityFilterComboBox->setEnabled(!local);
+#if ENABLE_CUSTOM_API_KEY
+    apiKeyWidget->setVisible(!local);
+    apiKeyLabel->setVisible(!local);
+#endif
+}
+
 void CaptionSettingsWidget::language_index_change(int new_index) {
     string lang_str = languageComboBox->currentData().toString().toStdString();
 
@@ -459,6 +479,16 @@ void CaptionSettingsWidget::virtualcam_name_index_change(int new_index) {
 }
 
 void CaptionSettingsWidget::accept_current_settings() {
+    const bool local = transcriptionProviderComboBox->currentData().toString() == "local_whisper";
+    const QUrl endpoint(localWhisperUrlLineEdit->text().trimmed());
+    const auto host = endpoint.host().toLower();
+    if (local && (!endpoint.isValid() || endpoint.scheme() != "http" ||
+        (host != "127.0.0.1" && host != "::1" && host != "localhost") ||
+        !endpoint.userInfo().isEmpty() || endpoint.hasQuery() || endpoint.hasFragment() ||
+        endpoint.port(80) < 1 || endpoint.port(80) > 65535)) {
+        QMessageBox::warning(this, "Local Whisper", "Enter an HTTP server address on this computer, such as http://127.0.0.1:8080/inference.");
+        return;
+    }
     SourceCaptionerSettings &source_settings = current_settings.source_cap_settings;
 
     string lang_str = languageComboBox->currentData().toString().toStdString();
@@ -469,6 +499,9 @@ void CaptionSettingsWidget::accept_current_settings() {
     source_settings.stream_settings.stream_settings.profanity_filter = profanity_filter;
 //    debug_log("profanity_filter: %d", profanity_filter);
     source_settings.stream_settings.stream_settings.api_key = apiKeyLineEdit->text().toStdString();
+    source_settings.transcription_provider = transcriptionProviderComboBox->currentData().toString().toStdString();
+    source_settings.local_whisper_url = localWhisperUrlLineEdit->text().trimmed().toStdString();
+    source_settings.local_whisper_chunk_seconds = localWhisperChunkSpinBox->value();
 
     source_settings.format_settings.caption_line_count = lineCountSpinBox->value();
     source_settings.format_settings.capitalization = (CapitalizationType) capitalizationComboBox->currentData().toInt();
@@ -564,6 +597,10 @@ void CaptionSettingsWidget::updateUi() {
 
     update_scene_collection_ui(scene_collection_name);
 
+    combobox_set_data_str(*transcriptionProviderComboBox, source_settings.transcription_provider.c_str(), 0);
+    localWhisperUrlLineEdit->setText(QString::fromStdString(source_settings.local_whisper_url));
+    localWhisperChunkSpinBox->setValue(source_settings.local_whisper_chunk_seconds);
+    transcription_provider_changed();
     combobox_set_data_str(*languageComboBox, source_settings.stream_settings.stream_settings.language.c_str(), 0);
     language_index_change(0);
     combobox_set_data_int(*profanityFilterComboBox, source_settings.stream_settings.stream_settings.profanity_filter, 0);

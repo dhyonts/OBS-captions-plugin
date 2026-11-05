@@ -71,6 +71,7 @@ set(obs_google_caption_plugin_SOURCES
         src/SourceAudioCaptureSession.cpp
         src/OutputAudioCaptureSession.cpp
         src/SourceCaptioner.cpp
+        src/LocalWhisperCaptioner.cpp
         src/CaptionResultHandler.cpp
 
         src/google_s2t_caption_plugin.cpp
@@ -83,6 +84,8 @@ set(obs_google_caption_plugin_HEADERS
         src/SourceAudioCaptureSession.h
         src/OutputAudioCaptureSession.h
         src/SourceCaptioner.h
+        src/LocalWhisperCaptioner.h
+        src/LocalWhisperAudio.h
         src/CaptionResultHandler.cpp
 
         src/ui/MainCaptionWidget.h
