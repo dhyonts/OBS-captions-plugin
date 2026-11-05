@@ -273,6 +273,7 @@ struct SrtState {
     // to prevent a sentence that had already started being spoken before the transcript started from going into the log
     // if it was started too long ago
     uint max_prestart_ms = 0;
+    shared_ptr<RecordingTranscriptTimeline> recording_timeline;
 };
 
 int batch_up_to(const SrtState &settings, ResultQueue &results) {
@@ -374,7 +375,8 @@ int write_results_batch_srt(const SrtState &settings, std::fstream &fs, const Re
 bool write_transcript_caption_results_srt(SrtState &settings, std::fstream &fs, ResultQueue &results, bool write_all) {
     // batch up multiple results into a single entry if the duration of all of them combined is less than settings.max_entry_duration
 
-    const auto now = std::chrono::steady_clock::now();
+    const auto wall_now = std::chrono::steady_clock::now();
+    const auto now = settings.recording_timeline ? settings.recording_timeline->map(wall_now) : wall_now;
     int wrote_cnt = 0;
     while (!results.empty() && !fs.fail()) {
         if (!write_all) {
@@ -542,9 +544,21 @@ void add_result(SrtState &settings, ResultQueue &results, shared_ptr<OutputCapti
 // blocks & waits unless stopped then just drains what's left if any
 template<typename T>
 bool dequeue_caption_output(CaptionOutputControl<T> &control, CaptionOutput &out) {
-    if (control.stop)
-        return control.caption_queue.try_dequeue(out);
-    control.caption_queue.wait_dequeue(out);
+    if (control.stop) {
+        if (!control.caption_queue.try_dequeue(out))
+            return false;
+    } else {
+        control.caption_queue.wait_dequeue(out);
+    }
+    if (control.recording_timeline && out.output_result && !out.is_clearance) {
+        // Each output owns its clock. Never change the result shared with live captions.
+        auto adjusted = std::make_shared<OutputCaptionResult>(*out.output_result);
+        auto &result = adjusted->caption_result;
+        if (control.recording_timeline->map_interval(result.first_received_at, result.received_at))
+            out.output_result = adjusted;
+        else
+            out.output_result = nullptr;
+    }
     return true;
 }
 
@@ -696,7 +710,8 @@ void transcript_writer_loop_inner(shared_ptr<CaptionOutputControl<TranscriptOutp
                                   const string target_name, const TranscriptOutputSettings transcript_settings) {
     const string format = transcript_settings.format;
     auto started_at_sys = std::chrono::system_clock::now();
-    auto started_at_steady = std::chrono::steady_clock::now();
+    auto started_at_steady = control->recording_timeline ? control->recording_timeline->started_at
+                                                       : std::chrono::steady_clock::now();
     const string to_what = target_name;
 
     UseTranscriptSettings use_settings;
@@ -765,6 +780,8 @@ void transcript_writer_loop_inner(shared_ptr<CaptionOutputControl<TranscriptOutp
                                      transcript_settings.srt_add_punctuation, transcript_settings.srt_split_single_sentences,
                                      transcript_settings.write_realtime,
                                      transcript_settings.srt_capitalization, 1250};
+
+        settings.recording_timeline = control->recording_timeline;
 
         debug_log("transcript_writer_loop starting write_loop: %s", format.c_str());
         if (format == "raw")

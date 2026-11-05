@@ -25,6 +25,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "SourceAudioCaptureSession.h"
 #include "OutputAudioCaptureSession.h"
 #include "CaptionResultHandler.h"
+#include "RecordingTranscriptTimeline.h"
 
 #include <QObject>
 #include <QTimer>
@@ -459,8 +460,10 @@ struct CaptionOutputControl {
     moodycamel::BlockingConcurrentQueue<CaptionOutput> caption_queue;
     std::atomic<bool> stop{false};
     T arg;
+    const std::shared_ptr<RecordingTranscriptTimeline> recording_timeline;
 
-    CaptionOutputControl(T arg) : arg(arg) {}
+    CaptionOutputControl(T arg, std::shared_ptr<RecordingTranscriptTimeline> timeline = nullptr)
+            : arg(arg), recording_timeline(std::move(timeline)) {}
 
     void stop_soon();
 
@@ -641,6 +644,8 @@ public:
     void recording_started_event();
 
     void recording_stopped_event();
+
+    void recording_pause_changed_event(bool paused);
 
     void virtualcam_started_event();
 

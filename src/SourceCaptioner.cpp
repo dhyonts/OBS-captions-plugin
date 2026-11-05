@@ -722,11 +722,23 @@ void SourceCaptioner::recording_started_event() {
     th.detach();
 
     if (this->base_enabled && cur_settings.transcript_settings.enabled && cur_settings.transcript_settings.recording_transcripts_enabled) {
-        auto control_transcript = std::make_shared<CaptionOutputControl<TranscriptOutputSettings>>(cur_settings.transcript_settings);
+        auto control_transcript = std::make_shared<CaptionOutputControl<TranscriptOutputSettings>>(
+                cur_settings.transcript_settings, std::make_shared<RecordingTranscriptTimeline>());
         transcript_recording_output.set_control(control_transcript);
 
         std::thread th2(transcript_writer_loop, control_transcript, "recording", cur_settings.transcript_settings);
         th2.detach();
+    }
+}
+
+void SourceCaptioner::recording_pause_changed_event(bool paused) {
+    std::lock_guard<recursive_mutex> lock(transcript_recording_output.control_change_mutex);
+    const auto &control = transcript_recording_output.control;
+    if (control && control->recording_timeline) {
+        if (paused)
+            control->recording_timeline->pause();
+        else
+            control->recording_timeline->resume();
     }
 }
 
