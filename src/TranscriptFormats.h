@@ -72,10 +72,10 @@ inline int webvtt_timestamp_ms(const std::string &value) {
     if (!std::regex_match(value, match, timestamp)) return -1;
     try {
         const auto hours = match[1].matched ? std::stoll(match[1]) : 0;
-        if (hours > std::numeric_limits<int>::max() / 3600000) return -1;
+        if (hours > (std::numeric_limits<int>::max)() / 3600000) return -1;
         const auto milliseconds = hours * 3600000 + std::stoi(match[2]) * 60000 +
                                   std::stoi(match[3]) * 1000 + std::stoi(match[4]);
-        return milliseconds <= std::numeric_limits<int>::max() ? static_cast<int>(milliseconds) : -1;
+        return milliseconds <= (std::numeric_limits<int>::max)() ? static_cast<int>(milliseconds) : -1;
     } catch (...) { return -1; }
 }
 
@@ -93,7 +93,7 @@ inline bool webvtt_append_offset(std::istream &existing, int &offset) {
         const auto end = webvtt_timestamp_ms(line.substr(end_begin, end_end - end_begin));
         if (start < previous_start || start < 0 || end <= start) return false;
         previous_start = start;
-        offset = std::max(offset, end);
+        offset = (std::max)(offset, end);
     }
     return !existing.bad();
 }

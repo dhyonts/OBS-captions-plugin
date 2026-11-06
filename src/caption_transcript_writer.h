@@ -342,7 +342,7 @@ int write_results_batch_srt(const SrtState &settings, std::fstream &fs, const Re
 
     if (start_offset_ms < 0)
         start_offset_ms = 0;
-    if (start_offset_ms > std::numeric_limits<int>::max() - settings.timestamp_offset_ms)
+    if (start_offset_ms > (std::numeric_limits<int>::max)() - settings.timestamp_offset_ms)
         return -1;
     start_offset_ms += settings.timestamp_offset_ms;
 
@@ -355,7 +355,7 @@ int write_results_batch_srt(const SrtState &settings, std::fstream &fs, const Re
 
     const auto raw_end_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::get<1>(results[up_to_index]) - settings.transcript_started_at).count();
-    if (raw_end_ms > std::numeric_limits<int>::max() - settings.timestamp_offset_ms)
+    if (raw_end_ms > (std::numeric_limits<int>::max)() - settings.timestamp_offset_ms)
         return -1;
     const int end_offset_ms = static_cast<int>(raw_end_ms) + settings.timestamp_offset_ms;
 
