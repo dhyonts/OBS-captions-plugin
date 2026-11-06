@@ -41,16 +41,19 @@ void set_text_source_text(const string &text_source_name, const string &caption_
     obs_source_release(text_source);
 }
 
-static void audio_feed_loop(std::shared_ptr<AudioFeedControl> control, ContinuousCaptions *continuous_captions) {
-    std::string chunk;
+static void audio_feed_loop(std::shared_ptr<AudioFeedControl> control, ContinuousCaptions *continuous_captions, LocalWhisperCaptioner *local_whisper) {
+    CapturedAudioChunk chunk;
     while (!control->stop) {
         control->audio_queue.wait_dequeue(chunk);
         if (control->stop)
             break;
-        if (chunk.empty())
+        if (chunk.pcm.empty())
             continue;
         try {
-            continuous_captions->queue_audio_data(chunk.data(), (uint) chunk.size());
+            if (local_whisper)
+                local_whisper->queue_audio_data(chunk);
+            else if (continuous_captions)
+                continuous_captions->queue_audio_data(chunk.pcm.data(), (uint) chunk.pcm.size());
         }
         catch (...) {
             error_log("audio feed thread, queue_audio_data error");
@@ -92,6 +95,7 @@ void SourceCaptioner::stop_caption_stream(bool send_signal) {
         stop_feed_thread();
         caption_result_handler = nullptr;
         continuous_captions = nullptr;
+        local_whisper = nullptr;
         audio_capture_id++;
         fileoutput_captions_output.clear();
         return;
@@ -107,6 +111,7 @@ void SourceCaptioner::stop_caption_stream(bool send_signal) {
     stop_feed_thread();
     caption_result_handler = nullptr;
     continuous_captions = nullptr;
+    local_whisper = nullptr;
     audio_capture_id++;
     fileoutput_captions_output.clear();
 
@@ -135,7 +140,10 @@ bool SourceCaptioner::set_settings(const SourceCaptionerSettings &new_settings, 
         stop_caption_stream(false);
 
         settings_equal = settings == new_settings;
-        stream_settings_equal = settings.stream_settings == new_settings.stream_settings;
+        stream_settings_equal = settings.stream_settings == new_settings.stream_settings &&
+                settings.transcription_provider == new_settings.transcription_provider &&
+                settings.local_whisper_url == new_settings.local_whisper_url &&
+                settings.local_whisper_chunk_seconds == new_settings.local_whisper_chunk_seconds;
 
         settings = new_settings;
         selected_scene_collection_name = scene_collection_name;
@@ -156,6 +164,10 @@ bool SourceCaptioner::set_settings(const SourceCaptionerSettings &new_settings, 
 
 bool SourceCaptioner::start_caption_stream(const SourceCaptionerSettings &new_settings, const string &scene_collection_name) {
 //    debug_log("start_caption_stream %d", (int) std::hash<std::thread::id>{}(std::this_thread::get_id()));
+    if (new_settings.transcription_provider != "google" && new_settings.transcription_provider != "local_whisper") {
+        warn_log("Unknown transcription provider; refusing to start");
+        return false;
+    }
     bool started_ok;
     bool settings_equal;
     bool stream_settings_equal;
@@ -164,7 +176,10 @@ bool SourceCaptioner::start_caption_stream(const SourceCaptionerSettings &new_se
     {
         std::lock_guard<recursive_mutex> lock(settings_change_mutex);
         settings_equal = settings == new_settings;
-        stream_settings_equal = settings.stream_settings == new_settings.stream_settings;
+        stream_settings_equal = settings.stream_settings == new_settings.stream_settings &&
+                settings.transcription_provider == new_settings.transcription_provider &&
+                settings.local_whisper_url == new_settings.local_whisper_url &&
+                settings.local_whisper_chunk_seconds == new_settings.local_whisper_chunk_seconds;
 
         settings = new_settings;
         selected_scene_collection_name = scene_collection_name;
@@ -235,7 +250,6 @@ bool SourceCaptioner::start_caption_stream(const SourceCaptionerSettings &new_se
 bool SourceCaptioner::_start_caption_stream(bool restart_stream) {
 //    debug_log("start_caption_stream");
 
-    bool caption_settings_equal;
     {
         const SceneCollectionSettings &scene_col_settings = this->settings.get_scene_collection_settings(selected_scene_collection_name);
         const CaptionSourceSettings &selected_caption_source_settings = scene_col_settings.caption_source_settings;
@@ -277,27 +291,38 @@ bool SourceCaptioner::_start_caption_stream(bool restart_stream) {
             }
         }
 
-        debug_log("caption_settings_equal: %d, %d", caption_settings_equal, continuous_captions != nullptr);
-        if (!continuous_captions || restart_stream) {
+        if ((!continuous_captions && !local_whisper) || local_whisper || restart_stream) {
             try {
+                auto caption_cb = std::bind(&SourceCaptioner::on_caption_text_callback, this, std::placeholders::_1, std::placeholders::_2);
+                if (settings.transcription_provider == "local_whisper") {
+                    continuous_captions = nullptr;
+                    local_whisper = std::make_unique<LocalWhisperCaptioner>(
+                            settings.local_whisper_url, settings.stream_settings.stream_settings.language,
+                            settings.local_whisper_chunk_seconds, caption_cb);
+                } else {
+                    local_whisper = nullptr;
 
 #if ENABLE_CUSTOM_API_KEY
-                ContinuousCaptionStreamSettings settings_copy = settings.stream_settings;
-                debug_log("using ENABLE_CUSTOM_API_KEY %lu", settings_copy.stream_settings.api_key.length());
+                    ContinuousCaptionStreamSettings settings_copy = settings.stream_settings;
+                    debug_log("using ENABLE_CUSTOM_API_KEY %lu", settings_copy.stream_settings.api_key.length());
 #else
 #ifdef GOOGLE_API_KEY_STR
-                ContinuousCaptionStreamSettings settings_copy = settings.stream_settings;
-                settings_copy.stream_settings.api_key = GOOGLE_API_KEY_STR;
-                debug_log("using GOOGLE_API_KEY_STR %lu", settings_copy.stream_settings.api_key.length());
+                    ContinuousCaptionStreamSettings settings_copy = settings.stream_settings;
+                    settings_copy.stream_settings.api_key = GOOGLE_API_KEY_STR;
+                    debug_log("using GOOGLE_API_KEY_STR %lu", settings_copy.stream_settings.api_key.length());
 #endif
 #endif
 
-                auto caption_cb = std::bind(&SourceCaptioner::on_caption_text_callback, this, std::placeholders::_1, std::placeholders::_2);
-                continuous_captions = std::make_unique<ContinuousCaptions>(settings_copy);
-                continuous_captions->on_caption_cb_handle.set(caption_cb, true);
+                    continuous_captions = std::make_unique<ContinuousCaptions>(settings_copy);
+                    continuous_captions->on_caption_cb_handle.set(caption_cb, true);
+                }
+            }
+            catch (const std::exception &ex) {
+                warn_log("couldn't create transcription engine: %s", ex.what());
+                return false;
             }
             catch (...) {
-                warn_log("couldn't create ContinuousCaptions");
+                warn_log("couldn't create transcription engine");
                 return false;
             }
         }
@@ -305,7 +330,7 @@ bool SourceCaptioner::_start_caption_stream(bool restart_stream) {
 
         try {
             audio_feed_control = std::make_shared<AudioFeedControl>(settings.stream_settings.stream_settings.max_queue_depth);
-            audio_feed_thread = std::thread(audio_feed_loop, audio_feed_control, continuous_captions.get());
+            audio_feed_thread = std::thread(audio_feed_loop, audio_feed_control, continuous_captions.get(), local_whisper.get());
         }
         catch (...) {
             audio_feed_control = nullptr;
@@ -370,7 +395,7 @@ void SourceCaptioner::process_audio_capture_status_change(const int cb_audio_cap
     bool is_old_audio_session = cb_audio_capture_id != audio_capture_id;
     SourceCaptionerSettings cur_settings = settings;
     string cur_scene_collection_name = selected_scene_collection_name;
-    bool active = continuous_captions != nullptr;
+    bool active = continuous_captions != nullptr || local_whisper != nullptr;
     bool source_removed = !is_old_audio_session && source_audio_capture_session
                           && source_audio_capture_session->is_source_removed();
 
@@ -404,19 +429,20 @@ void SourceCaptioner::on_audio_data_callback(const int id, const uint8_t *data, 
     if (audio_feed_control && !audio_feed_control->stop) {
         // safe without locking as audio_feed_control only ever gets updated when there's no AudioCaptureSession running
         if (audio_feed_control->max_queue_depth) {
-            std::string dropped;
+            CapturedAudioChunk dropped;
             while (audio_feed_control->audio_queue.size_approx() > audio_feed_control->max_queue_depth) {
                 if (!audio_feed_control->audio_queue.try_dequeue(dropped))
                     break;
             }
         }
-        audio_feed_control->audio_queue.enqueue(std::string((const char *) data, size));
+        audio_feed_control->audio_queue.enqueue(CapturedAudioChunk{std::string((const char *) data, size), std::chrono::steady_clock::now()});
     }
     audio_chunk_count++;
 
 }
 
 void SourceCaptioner::stop_feed_thread() {
+    if (local_whisper) local_whisper->request_stop();
     if (audio_feed_control)
         audio_feed_control->stop_soon();
     if (audio_feed_thread.joinable())
@@ -548,7 +574,8 @@ void SourceCaptioner::process_caption_result(const CaptionResult caption_result,
     string recent_caption_text;
     bool to_stream, to_recording, to_transcript_streaming, to_transcript_recording, to_transcript_virtualcam;
 
-    if (this->last_caption_text == caption_result.caption_text && this->last_caption_final == caption_result.final) {
+    if (settings.transcription_provider != "local_whisper" &&
+        this->last_caption_text == caption_result.caption_text && this->last_caption_final == caption_result.final) {
         return;
     }
     this->last_caption_text = caption_result.caption_text;

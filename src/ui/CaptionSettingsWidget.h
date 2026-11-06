@@ -43,6 +43,7 @@ Q_OBJECT
 private slots:
 
     void transcript_formats_changed();
+    void transcription_provider_changed();
 
     void language_index_change(int index);
 

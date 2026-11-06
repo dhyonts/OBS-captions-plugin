@@ -27,6 +27,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "CaptionResultHandler.h"
 #include "RecordingTranscriptTimeline.h"
 #include "TranscriptFormats.h"
+#include "LocalWhisperCaptioner.h"
 
 #include <QObject>
 #include <QTimer>
@@ -345,6 +346,9 @@ struct SourceCaptionerSettings {
 
     CaptionFormatSettings format_settings;
     ContinuousCaptionStreamSettings stream_settings;
+    string transcription_provider = "google";
+    string local_whisper_url = "http://127.0.0.1:8080/inference";
+    int local_whisper_chunk_seconds = 5;
 
     SourceCaptionerSettings();
 
@@ -375,7 +379,10 @@ struct SourceCaptionerSettings {
                file_output_settings == rhs.file_output_settings &&
                scene_collection_settings == rhs.scene_collection_settings &&
                format_settings == rhs.format_settings &&
-               stream_settings == rhs.stream_settings;
+               stream_settings == rhs.stream_settings &&
+               transcription_provider == rhs.transcription_provider &&
+               local_whisper_url == rhs.local_whisper_url &&
+               local_whisper_chunk_seconds == rhs.local_whisper_chunk_seconds;
 //               scene_collection_settings_map == rhs.scene_collection_settings_map &&
     }
 
@@ -444,7 +451,7 @@ struct CaptionOutput {
 };
 
 struct AudioFeedControl {
-    moodycamel::BlockingConcurrentQueue<std::string> audio_queue;
+    moodycamel::BlockingConcurrentQueue<CapturedAudioChunk> audio_queue;
     std::atomic<bool> stop{false};
     const uint max_queue_depth;
 
@@ -452,7 +459,7 @@ struct AudioFeedControl {
 
     void stop_soon() {
         stop = true;
-        audio_queue.enqueue(std::string());
+        audio_queue.enqueue(CapturedAudioChunk{});
     }
 };
 
@@ -542,6 +549,7 @@ Q_OBJECT
     std::unique_ptr<SourceAudioCaptureSession> source_audio_capture_session;
     std::unique_ptr<OutputAudioCaptureSession> output_audio_capture_session;
     std::unique_ptr<ContinuousCaptions> continuous_captions;
+    std::unique_ptr<LocalWhisperCaptioner> local_whisper;
     std::shared_ptr<AudioFeedControl> audio_feed_control;
     std::thread audio_feed_thread;
     uint audio_chunk_count = 0;
