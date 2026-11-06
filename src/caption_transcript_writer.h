@@ -190,13 +190,14 @@ QFileInfo find_transcript_filename(string format,
                                    const string &target_name,
                                    const std::chrono::system_clock::time_point &started_at,
                                    const int tries,
-                                   bool &out_overwrite) {
+                                   bool &out_overwrite,
+    const string &extension_override = "") {
     out_overwrite = false;
     if (rel.name_type == "custom") {
         return find_transcript_filename_custom(rel, output_directory, started_at, tries, out_overwrite);
     }
 
-    const string extension = transcript_format_extension(format, "");
+    const string extension = extension_override.empty() ? transcript_format_extension(format, "") : extension_override;
     if (rel.name_type == "datetime") {
         return find_transcript_filename_datetime(rel, output_directory, started_at, tries, extension);
     }
@@ -274,6 +275,8 @@ struct SrtState {
     // if it was started too long ago
     uint max_prestart_ms = 0;
     shared_ptr<RecordingTranscriptTimeline> recording_timeline;
+    bool webvtt = false;
+    int timestamp_offset_ms = 0;
 };
 
 int batch_up_to(const SrtState &settings, ResultQueue &results) {
@@ -339,20 +342,30 @@ int write_results_batch_srt(const SrtState &settings, std::fstream &fs, const Re
 
     if (start_offset_ms < 0)
         start_offset_ms = 0;
+    if (start_offset_ms > (std::numeric_limits<int>::max)() - settings.timestamp_offset_ms)
+        return -1;
+    start_offset_ms += settings.timestamp_offset_ms;
 
     string start_offset_str = time_duration_stream(start_offset_ms);
+    if (settings.webvtt)
+        std::replace(start_offset_str.begin(), start_offset_str.end(), ',', '.');
     if (start_offset_str.empty()) {
         return -1;
     }
 
-    const int end_offset_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+    const auto raw_end_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::get<1>(results[up_to_index]) - settings.transcript_started_at).count();
+    if (raw_end_ms > (std::numeric_limits<int>::max)() - settings.timestamp_offset_ms)
+        return -1;
+    const int end_offset_ms = static_cast<int>(raw_end_ms) + settings.timestamp_offset_ms;
 
-    if (end_offset_ms < 0) {
+    if (end_offset_ms < 0 || (settings.webvtt && end_offset_ms <= start_offset_ms)) {
         return 0;
     }
 
-    const string end_offset_str = time_duration_stream(end_offset_ms);
+    string end_offset_str = time_duration_stream(end_offset_ms);
+    if (settings.webvtt)
+        std::replace(end_offset_str.begin(), end_offset_str.end(), ',', '.');
     if (end_offset_str.empty()) {
         return -1;
     }
@@ -363,9 +376,10 @@ int write_results_batch_srt(const SrtState &settings, std::fstream &fs, const Re
     }
 
     std::ostringstream entry_os;
-    entry_os << settings.sequence_number << NEWLINE_STR;
+    if (!settings.webvtt)
+        entry_os << settings.sequence_number << NEWLINE_STR;
     entry_os << start_offset_str << " --> " << end_offset_str << NEWLINE_STR;
-    entry_os << entry_text << NEWLINE_STR;
+    entry_os << (settings.webvtt ? webvtt_escape_text(entry_text) : entry_text) << NEWLINE_STR;
     entry_os << NEWLINE_STR;
 
     fs_write_string(fs, entry_os.str());
@@ -709,9 +723,9 @@ void write_loop_raw(std::fstream &fs, const std::chrono::steady_clock::time_poin
 void transcript_writer_loop_inner(shared_ptr<CaptionOutputControl<TranscriptOutputSettings>> control,
                                   const string target_name, const TranscriptOutputSettings transcript_settings) {
     const string format = transcript_settings.format;
-    auto started_at_sys = std::chrono::system_clock::now();
+    const auto started_at_sys = control->started_at_sys;
     auto started_at_steady = control->recording_timeline ? control->recording_timeline->started_at
-                                                       : std::chrono::steady_clock::now();
+                                                       : control->started_at_steady;
     const string to_what = target_name;
 
     UseTranscriptSettings use_settings;
@@ -725,7 +739,7 @@ void transcript_writer_loop_inner(shared_ptr<CaptionOutputControl<TranscriptOutp
         return;
     }
 
-    if (format != "txt" && format != "txt_plain" && format != "srt" && format != "raw") {
+    if (format != "txt" && format != "txt_plain" && format != "srt" && format != "vtt" && format != "raw") {
         error_log("transcript_writer_loop %s error, invalid format: %s", to_what.c_str(), format.c_str());
         return;
     }
@@ -745,8 +759,12 @@ void transcript_writer_loop_inner(shared_ptr<CaptionOutputControl<TranscriptOutp
     QString transcript_file;
     bool overwrite_file = false;
     try {
-        transcript_file = find_transcript_filename(transcript_settings.format, use_settings, output_directory, target_name, started_at_sys, 100,
-                                                   overwrite_file)
+        const auto formats = transcript_formats(control->arg.format);
+        const auto extension = transcript_output_extension(format, formats);
+        if (formats.size() > 1 && use_settings.name_type == "custom")
+            use_settings.filename_custom = transcript_custom_filename(use_settings.filename_custom, extension);
+        transcript_file = find_transcript_filename(format, use_settings, output_directory, target_name, started_at_sys, 100,
+                                                   overwrite_file, extension)
                 .absoluteFilePath();
         info_log("using transcript output file: '%s', overwrite existing: %d", transcript_file.toStdString().c_str(), overwrite_file);
     }
@@ -760,6 +778,20 @@ void transcript_writer_loop_inner(shared_ptr<CaptionOutputControl<TranscriptOutp
     }
 
     try {
+        const bool vtt_header_needed = format == "vtt" && (overwrite_file || QFileInfo(transcript_file).size() == 0);
+        int vtt_append_offset_ms = 0;
+        if (format == "vtt" && !vtt_header_needed) {
+            std::ifstream existing;
+#if _WIN32
+            existing.open(transcript_file.toStdWString(), std::ios::binary);
+#else
+            existing.open(transcript_file.toStdString(), std::ios::binary);
+#endif
+            if (!webvtt_append_offset(existing, vtt_append_offset_ms)) {
+                error_log("Cannot append VTT to an invalid WebVTT file: %s", transcript_file.toStdString().c_str());
+                return;
+            }
+        }
         std::fstream fs;
 
 #if _WIN32
@@ -774,6 +806,11 @@ void transcript_writer_loop_inner(shared_ptr<CaptionOutputControl<TranscriptOutp
             return;
         }
 
+        if (format == "vtt") {
+            fs_write_string(fs, vtt_header_needed ? "WEBVTT" + NEWLINE_STR + NEWLINE_STR : NEWLINE_STR + NEWLINE_STR);
+            if (transcript_settings.write_realtime) fs.flush();
+        }
+
         const uint max_duration_secs = transcript_settings.srt_target_duration_secs ? transcript_settings.srt_target_duration_secs : 1;
         SrtState settings = SrtState{started_at_steady, std::chrono::seconds(max_duration_secs), 1,
                                      transcript_settings.srt_target_line_length,
@@ -782,6 +819,8 @@ void transcript_writer_loop_inner(shared_ptr<CaptionOutputControl<TranscriptOutp
                                      transcript_settings.srt_capitalization, 1250};
 
         settings.recording_timeline = control->recording_timeline;
+        settings.webvtt = format == "vtt";
+        settings.timestamp_offset_ms = vtt_append_offset_ms;
 
         debug_log("transcript_writer_loop starting write_loop: %s", format.c_str());
         if (format == "raw")
@@ -810,9 +849,57 @@ void transcript_writer_loop_inner(shared_ptr<CaptionOutputControl<TranscriptOutp
 
 void transcript_writer_loop(shared_ptr<CaptionOutputControl<TranscriptOutputSettings>> control,
                             const string target_name, const TranscriptOutputSettings transcript_settings) {
-    transcript_writer_loop_inner(control, target_name, transcript_settings);
-    // so nothing else gets queued after this
+    const auto formats = transcript_formats(transcript_settings.format);
+    if (formats.size() == 1) {
+        auto settings = transcript_settings;
+        settings.format = formats.front();
+        transcript_writer_loop_inner(control, target_name, settings);
+        control->stop = true;
+        return;
+    }
+
+    vector<shared_ptr<CaptionOutputControl<TranscriptOutputSettings>>> outputs;
+    vector<std::thread> threads;
+    // Reserve before starting threads so allocation failures cannot strand one.
+    outputs.reserve(formats.size());
+    threads.reserve(formats.size());
+    try {
+        for (const auto &format : formats) {
+            // The control retains the full selection for collision-free filenames.
+            auto child = std::make_shared<CaptionOutputControl<TranscriptOutputSettings>>(
+                    transcript_settings, control->recording_timeline);
+            child->started_at_sys = control->started_at_sys;
+            child->started_at_steady = control->started_at_steady;
+            auto settings = transcript_settings;
+            settings.format = format;
+            outputs.push_back(child);
+            threads.emplace_back([child, target_name, settings]() {
+                transcript_writer_loop_inner(child, target_name, settings);
+                child->stop = true;
+            });
+        }
+        CaptionOutput caption;
+        while (true) {
+            if (control->stop) {
+                if (!control->caption_queue.try_dequeue(caption)) break;
+            } else {
+                control->caption_queue.wait_dequeue(caption);
+            }
+            bool active = false;
+            for (const auto &child : outputs) {
+                if (!child->stop) {
+                    child->caption_queue.enqueue(caption);
+                    active = true;
+                }
+            }
+            if (!active) break;
+        }
+    } catch (const std::exception &ex) {
+        error_log("transcript multi-format output failed: %s", ex.what());
+    }
     control->stop = true;
+    for (const auto &child : outputs) child->stop_soon();
+    for (auto &thread : threads) if (thread.joinable()) thread.join();
 }
 
 
