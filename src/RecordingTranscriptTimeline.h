@@ -20,7 +20,7 @@ public:
     void pause(TimePoint at = Clock::now()) {
         std::lock_guard<std::mutex> lock(mutex);
         if (!paused) {
-            pauses.emplace_back(at, TimePoint::max());
+            pauses.emplace_back(at, (TimePoint::max)());
             paused = true;
         }
     }
@@ -63,7 +63,7 @@ private:
         for (const auto &pause : pauses) {
             if (at <= pause.first)
                 break;
-            removed += std::min(at, pause.second) - pause.first;
+            removed += (std::min)(at, pause.second) - pause.first;
         }
         return at - removed;
     }

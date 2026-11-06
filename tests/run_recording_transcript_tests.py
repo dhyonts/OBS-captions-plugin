@@ -151,6 +151,9 @@ compiler = shlex.split(os.environ.get('CXX', 'c++'))
 flags = ['-std=c++17', '-Wall', '-Wextra', '-Werror', '-pthread']
 with tempfile.TemporaryDirectory() as temp:
     temp = Path(temp)
+    subprocess.run(compiler + flags + [str(root / 'tests/windows_minmax_macros_test.cpp'),
+                   '-o', str(temp / 'windows_macros')], check=True)
+    subprocess.run([str(temp / 'windows_macros')], check=True)
     subprocess.run(compiler + flags + [str(root / 'tests/recording_transcript_timeline_test.cpp'),
                    '-o', str(temp / 'timeline')], check=True)
     subprocess.run([str(temp / 'timeline')], check=True, cwd=temp)
