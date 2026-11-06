@@ -92,6 +92,8 @@ public:
 
     void recording_stopped_event();
 
+    void recording_pause_changed_event(bool paused);
+
     void virtualcam_started_event();
 
     void virtualcam_stopped_event();

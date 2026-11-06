@@ -97,6 +97,10 @@ static void obs_event(enum obs_frontend_event event, void *) {
         stream_stopped_event();
     } else if (event == OBS_FRONTEND_EVENT_RECORDING_STARTED) {
         recording_started_event();
+    } else if (event == OBS_FRONTEND_EVENT_RECORDING_PAUSED ||
+               event == OBS_FRONTEND_EVENT_RECORDING_UNPAUSED) {
+        if (main_caption_widget)
+            main_caption_widget->recording_pause_changed_event(event == OBS_FRONTEND_EVENT_RECORDING_PAUSED);
     } else if (event == OBS_FRONTEND_EVENT_RECORDING_STOPPED) {
         recording_stopped_event();
     } else if (event == OBS_FRONTEND_EVENT_VIRTUALCAM_STARTED) {

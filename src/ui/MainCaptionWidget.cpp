@@ -162,6 +162,10 @@ void MainCaptionWidget::recording_started_event() {
     external_state_changed();
 }
 
+void MainCaptionWidget::recording_pause_changed_event(bool paused) {
+    plugin_manager.source_captioner.recording_pause_changed_event(paused);
+}
+
 void MainCaptionWidget::recording_stopped_event() {
     plugin_manager.source_captioner.recording_stopped_event();
     external_state_changed();
